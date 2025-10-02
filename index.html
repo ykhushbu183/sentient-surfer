@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sentient Subway Dog</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      height: 100%; width: 100%;
+      overflow: hidden;
+      background: #071021;
+      font-family: sans-serif;
+      color: #fff;
+    }
+    #score {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 6px 12px; border-radius: 6px;
+      font-size: 18px;
+    }
+    #overlay {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column;
+      font-size: 24px; font-weight: bold;
+      visibility: hidden;
+    }
+    #overlay.show { visibility: visible; }
+    #restartBtn {
+      margin-top: 12px; padding: 8px 16px;
+      background: #1da1f2; color: #fff;
+      border: none; border-radius: 6px; cursor: pointer;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="score">Score: 0</div>
+  <div id="overlay">
+    <div>Game Over</div>
+    <button id="restartBtn">Restart</button>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+  <script>
+  // === Setup ===
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  // Lighting
+  const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+  scene.add(light);
+
+  // === Player (dog sprite) ===
+  const DOG_IMAGE_PATH = "assets/dog.png"; // <- put your image here
+  const texLoader = new THREE.TextureLoader();
+  const dogTex = texLoader.load(DOG_IMAGE_PATH);
+  const playerMat = new THREE.SpriteMaterial({map: dogTex});
+  const player = new THREE.Sprite(playerMat);
+  player.scale.set(2,2,1);
+  scene.add(player);
+
+  // Position
+  let lanes = [-2,0,2];
+  let currentLane = 1; // middle
+  player.position.set(lanes[currentLane], 1, 0);
+
+  // === Ground ===
+  const groundGeo = new THREE.PlaneGeometry(20,200);
+  const groundMat = new THREE.MeshBasicMaterial({color:0x111111});
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.position.z = -100;
+  scene.add(ground);
+
+  camera.position.set(0,3,5);
+  camera.lookAt(0,1,0);
+
+  // === Obstacles & Coins ===
+  const obstacles = [];
+  const coins = [];
+  const clock = new THREE.Clock();
+  let speed = 0.1;
+  let score = 0;
+  let running = true;
+
+  function spawnObstacle(){
+    const geo = new THREE.BoxGeometry(1,1,1);
+    const mat = new THREE.MeshBasicMaterial({color:0xff3333});
+    const obs = new THREE.Mesh(geo, mat);
+    obs.position.set(lanes[Math.floor(Math.random()*3)], 0.5, -60);
+    scene.add(obs);
+    obstacles.push(obs);
+  }
+
+  function spawnCoin(){
+    const geo = new THREE.CircleGeometry(0.5, 32);
+    const mat = new THREE.MeshBasicMaterial({color:0xffff00});
+    const coin = new THREE.Mesh(geo, mat);
+    coin.rotation.x = -Math.PI/2;
+    coin.position.set(lanes[Math.floor(Math.random()*3)], 0.5, -60);
+    scene.add(coin);
+    coins.push(coin);
+  }
+
+  // === Controls ===
+  function moveLeft(){
+    if(currentLane>0) currentLane--;
+  }
+  function moveRight(){
+    if(currentLane<2) currentLane++;
+  }
+  function jump(){
+    // simple jump effect
+    if(player.position.y <= 1.01){
+      gsap.to(player.position, {y:3, duration:0.3, yoyo:true, repeat:1});
+    }
+  }
+
+  window.addEventListener("keydown", e=>{
+    if(!running) return;
+    if(e.key==="ArrowLeft"||e.key==="a") moveLeft();
+    if(e.key==="ArrowRight"||e.key==="d") moveRight();
+    if(e.key==="ArrowUp"||e.key==="w") jump();
+  });
+
+  // Swipe (mobile)
+  let sx=0, sy=0;
+  window.addEventListener("touchstart", e=>{
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+  });
+  window.addEventListener("touchend", e=>{
+    let dx = e.changedTouches[0].clientX - sx;
+    let dy = e.changedTouches[0].clientY - sy;
+    if(Math.abs(dx)>Math.abs(dy)){
+      if(dx>30) moveRight();
+      else if(dx<-30) moveLeft();
+    } else {
+      if(dy<-30) jump();
+    }
+  });
+
+  // === Game Loop ===
+  const scoreEl = document.getElementById("score");
+  const overlay = document.getElementById("overlay");
+  const restartBtn = document.getElementById("restartBtn");
+
+  function resetGame(){
+    for(const o of obstacles) scene.remove(o);
+    for(const c of coins) scene.remove(c);
+    obstacles.length=0; coins.length=0;
+    score=0; speed=0.1; running=true;
+    currentLane=1; player.position.set(lanes[currentLane],1,0);
+    overlay.classList.remove("show");
+    animate();
+  }
+
+  restartBtn.addEventListener("click", resetGame);
+
+  let spawnTimer = 0;
+  function animate(){
+    if(!running) return;
+    requestAnimationFrame(animate);
+    const delta = clock.getDelta();
+
+    // Move player toward lane smoothly
+    player.position.x += (lanes[currentLane] - player.position.x)*0.2;
+
+    // Move obstacles & coins
+    for(const o of obstacles) o.position.z += speed*10*delta;
+    for(const c of coins) c.position.z += speed*10*delta;
+
+    // Collision check
+    for(const o of obstacles){
+      if(o.position.z>5){
+        scene.remove(o);
+      } else if(Math.abs(o.position.z)<0.5 && Math.abs(o.position.x-player.position.x)<1){
+        running=false;
+        overlay.classList.add("show");
+      }
+    }
+
+    for(let i=coins.length-1;i>=0;i--){
+      const c=coins[i];
+      if(c.position.z>5){
+        scene.remove(c); coins.splice(i,1);
+      } else if(Math.abs(c.position.z)<0.5 && Math.abs(c.position.x-player.position.x)<1){
+        score+=10;
+        scene.remove(c); coins.splice(i,1);
+      }
+    }
+
+    // Spawning
+    spawnTimer += delta;
+    if(spawnTimer>1.5){
+      if(Math.random()<0.5) spawnObstacle(); else spawnCoin();
+      spawnTimer=0;
+    }
+
+    // Increase speed gradually
+    speed += delta*0.002;
+
+    // Update score
+    score += Math.floor(delta*100);
+    scoreEl.textContent = "Score: "+score;
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+</body>
+</html>
